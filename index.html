@@ -1005,6 +1005,10 @@
       <button class="btn-primary" id="sbPushBtn" style="flex:1;background:#1f8a3b;border-color:#186e2f;color:#fff">⬆ Save to cloud</button>
       <button class="btn-ghost" id="sbPullBtn" style="flex:1">⬇ Load from cloud</button>
     </div>
+    <label style="display:flex;align-items:center;gap:9px;margin-top:12px;font-size:13px;color:var(--ink-dim);cursor:pointer;font-weight:600">
+      <input type="checkbox" id="sbAutoChk" style="width:19px;height:19px;accent-color:#1f8a3b;cursor:pointer">
+      Auto-save to cloud after every change
+    </label>
   </div>
 
   <button id="copyNewChatBtn" style="display:block;width:100%;background:linear-gradient(180deg,#9a2a2a 0%,#7a1818 50%,#5e1010 100%);border:1px solid #4a0d0d;border-top-color:#b54a4a;color:#fff;border-radius:8px;padding:13px;font-size:14px;font-weight:700;text-align:center;margin-top:22px;text-transform:uppercase;letter-spacing:.05em;box-shadow:0 2px 4px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25);text-shadow:0 -1px 1px rgba(0,0,0,.4);cursor:pointer">📋 Copy New-Chat Instructions</button>
@@ -1135,10 +1139,20 @@ const QA_EMAIL_DEFAULT = "rarnold@camcomfginc.com";  // default QA inbox; can be
    every version display (footer, browser tab, download filename, handoff prompt) stays
    in sync automatically. BUILD_DATE stamps when this file was generated. */
 const APP_NAME = "MACHINIST VALIDATION";
-const APP_REV  = 86;                                  // <-- increment by 1 on every change
+const APP_REV  = 87;                                  // <-- increment by 1 on every change
 const APP_VERSION = `${APP_NAME} - REV-${APP_REV}`;   // e.g. "MACHINIST VALIDATION - REV-56"
 const BUILD_DATE = "2026-07-05";
-/* Rev-86 changelog:
+/* Rev-87 changelog:
+   - CLOUD AUTO-SAVE. When signed in to Cloud Sync, the app now saves the whole snapshot to
+     the cloud automatically ~4 seconds after any change (new reading, run, setting, part or
+     operation edit) — no more remembering to tap "Save to cloud". Safety guards: auto-save
+     only arms AFTER this device has done one successful "Load from cloud" or manual "Save to
+     cloud" (so a fresh device with demo data can never silently overwrite a good backup);
+     it's paused during Preview mode and while a cloud Load is applying; overlapping pushes
+     queue instead of colliding. New "Auto-save to cloud" checkbox in the Cloud Sync panel
+     (ON by default) and the panel status line shows the last auto-save time.
+   --- prior history ---
+   Rev-86 changelog:
    - Added a "WHAT IS SUPABASE?" info button in Administration (inside the Cloud Sync panel).
      Tapping it opens a detailed plain-language explainer: what Supabase is, why the app uses it
      (optional cloud backup + multi-device sync of all inspection data), how each piece works
@@ -1545,6 +1559,7 @@ function sbInit(){
 function renderCloudPanel(){
   if($("sbUrl")) $("sbUrl").value = settings.supabaseUrl||"";
   if($("sbKey")) $("sbKey").value = settings.supabaseKey||"";
+  if($("sbAutoChk")) $("sbAutoChk").checked = autoCloudEnabled();
   const st=$("sbStatus"); if(!st) return;
   if(!settings.supabaseUrl||!settings.supabaseKey){ st.textContent="Not connected — enter your Supabase URL and key, then Save connection."; st.style.color="var(--ink-dim)"; return; }
   if(!window.supabase){ st.textContent="Cloud library didn't load (need internet). Local mode only."; st.style.color="var(--nogo)"; return; }
@@ -1580,11 +1595,56 @@ async function buildSnapshot(){
     settings: await getAllSettings(), runs: await getAllRuns(), readings: await getAllReadings() };
 }
 async function applySnapshot(snap){
-  await clearStore(SETTINGS); await clearStore(RUNS); await clearStore(STORE);
-  if(snap.settings){ for(const k of Object.keys(snap.settings)){ await putSetting(k, snap.settings[k]); } }
-  if(Array.isArray(snap.runs)){ for(const r of snap.runs){ await putRun(r); } }
-  if(Array.isArray(snap.readings)){ for(const rd of snap.readings){ await putReading(rd); } }
+  applyingSnapshot=true;
+  try{
+    await clearStore(SETTINGS); await clearStore(RUNS); await clearStore(STORE);
+    if(snap.settings){ for(const k of Object.keys(snap.settings)){ await putSetting(k, snap.settings[k]); } }
+    if(Array.isArray(snap.runs)){ for(const r of snap.runs){ await putRun(r); } }
+    if(Array.isArray(snap.readings)){ for(const rd of snap.readings){ await putReading(rd); } }
+  } finally { applyingSnapshot=false; }
 }
+
+/* ---------- Cloud AUTO-SAVE (Rev-87) ----------
+   Quietly pushes the whole snapshot ~4s after any data change, so nobody has to remember
+   to tap "Save to cloud". Guards:
+   - Arms only after this device has completed one successful Load-from-cloud or manual
+     Save-to-cloud (localStorage flag) — a fresh device full of demo data can never
+     silently overwrite a good cloud backup.
+   - Skips while in Preview mode or while a cloud Load is being applied.
+   - Overlapping pushes queue (one at a time; latest state wins). */
+const CLOUD_SYNCED_FLAG="mv_cloud_synced_once";
+let cloudPushTimer=null, applyingSnapshot=false, autoPushBusy=false, autoPushAgain=false;
+function cloudSyncedOnce(){ try{ return !!localStorage.getItem(CLOUD_SYNCED_FLAG); }catch(e){ return false; } }
+function markCloudSynced(){ try{ localStorage.setItem(CLOUD_SYNCED_FLAG,"1"); }catch(e){} }
+function autoCloudEnabled(){ return settings.autoCloud!==false; }   // default ON
+function queueCloudAutoSave(){
+  if(previewMode||applyingSnapshot) return;
+  if(!sbClient||!sbUser) return;
+  if(!autoCloudEnabled()) return;
+  if(!cloudSyncedOnce()) return;
+  clearTimeout(cloudPushTimer);
+  cloudPushTimer=setTimeout(sbAutoPush,4000);
+}
+async function sbAutoPush(){
+  if(autoPushBusy){ autoPushAgain=true; return; }
+  autoPushBusy=true;
+  try{
+    const snap=await buildSnapshot();
+    const {error}=await sbClient.from("snapshots").upsert({user_id:sbUser.id, data:snap, updated_at:new Date().toISOString()});
+    if(error){ sbSetStatus("Auto-save failed: "+error.message,false); }
+    else { sbSetStatus("Auto-saved to cloud ✓ "+new Date().toLocaleTimeString(),true); }
+  }catch(e){ sbSetStatus("Auto-save failed: "+(e&&e.message?e.message:e),false); }
+  autoPushBusy=false;
+  if(autoPushAgain){ autoPushAgain=false; queueCloudAutoSave(); }
+}
+/* Any successful local write schedules an auto-save. */
+(function(){
+  const _ps=putSetting,_pr=putRun,_prd=putReading,_dr=deleteRun;
+  putSetting=function(k,v){ const p=_ps(k,v); p.then(queueCloudAutoSave).catch(()=>{}); return p; };
+  putRun    =function(r){   const p=_pr(r);   p.then(queueCloudAutoSave).catch(()=>{}); return p; };
+  putReading=function(rd){  const p=_prd(rd); p.then(queueCloudAutoSave).catch(()=>{}); return p; };
+  deleteRun =function(id){  const p=_dr(id);  p.then(queueCloudAutoSave).catch(()=>{}); return p; };
+})();
 function sbSetStatus(msg, ok){ const st=$("sbStatus"); if(st){ st.textContent=msg; st.style.color = ok ? "#1f8a3b" : "var(--nogo)"; } }
 async function sbPush(){
   if(!sbClient||!sbUser){ flash("Sign in to the cloud first",true); sbSetStatus("Sign in to the cloud first",false); return; }
@@ -1593,6 +1653,7 @@ async function sbPush(){
     const sizeKB=Math.round(JSON.stringify(snap).length/1024);
     const {error}=await sbClient.from("snapshots").upsert({user_id:sbUser.id, data:snap, updated_at:new Date().toISOString()});
     if(error){ const m="Save failed: "+error.message; flash(m,true); sbSetStatus(m,false); return; }
+    markCloudSynced();
     flash("Saved to cloud ✓"); sbSetStatus(`Saved to cloud ✓ (${sizeKB} KB)`,true);
   }catch(e){ const m="Save failed: "+(e&&e.message?e.message:e); flash(m,true); sbSetStatus(m+" (if this is about size, your images are too large for one snapshot — tell Claude)",false); }
 }
@@ -1603,6 +1664,7 @@ async function sbPull(silent){
     if(error){ if(!silent){ const m="Load failed: "+error.message; flash(m,true); sbSetStatus(m,false); } return; }
     if(!data||!data.data){ if(!silent){ flash("No cloud data saved yet",false); sbSetStatus("No cloud data saved yet — Save to cloud first.",false); } return; }
     await applySnapshot(data.data);
+    markCloudSynced();
     flash("Loaded from cloud — reloading…"); sbSetStatus("Loaded from cloud — reloading…",true);
     setTimeout(()=>location.reload(),700);
   }catch(e){ if(!silent){ const m="Load failed: "+(e&&e.message?e.message:e); flash(m,true); sbSetStatus(m,false); } }
@@ -3682,9 +3744,10 @@ async function loadSettings(){
   if(Array.isArray(au)) settings.authors=au;
   if(Array.isArray(cu)) settings.customers=cu;
   if(Array.isArray(ar)) settings.archivedSOs=ar;
-  const su=await getSetting("supabaseUrl"), sk=await getSetting("supabaseKey");
+  const su=await getSetting("supabaseUrl"), sk=await getSetting("supabaseKey"), ac=await getSetting("autoCloud");
   if(su!==undefined) settings.supabaseUrl=su;
   if(sk!==undefined) settings.supabaseKey=sk;
+  if(ac!==undefined) settings.autoCloud=ac;
   if(pw){ settings.editPassword=pw; EDIT_PASSWORD=pw; }
   upcaseAllData();
 }
@@ -3893,6 +3956,11 @@ if($("sbSaveCfg")){
   $("sbSignOutBtn").onclick=sbSignOut;
   $("sbPushBtn").onclick=sbPush;
   $("sbPullBtn").onclick=()=>sbPull(false);
+  $("sbAutoChk").onchange=async e=>{
+    settings.autoCloud=e.target.checked;
+    await putSetting("autoCloud",settings.autoCloud);
+    flash(settings.autoCloud?"Auto-save to cloud: ON":"Auto-save to cloud: OFF");
+  };
 }
 $("adBack").onclick=showMenu;
 
