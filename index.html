@@ -638,6 +638,11 @@
 
 <!-- MAIN MENU -->
 <section class="menu" id="menu">
+  <div id="offlineWarn" style="display:none;background:#c62828;border:2px solid #8e1717;border-radius:10px;padding:14px 16px;margin-bottom:16px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25)">
+    <div style="font-weight:800;font-size:15px;letter-spacing:.05em;margin-bottom:4px">⚠️ OFFLINE COPY — NOT THE LIVE SITE</div>
+    <div style="font-size:13px;line-height:1.5;margin-bottom:10px">You opened a saved copy of this app. Work done here is separate from the live site and could overwrite your cloud backup with old data. Unless you're doing this on purpose, use the live site instead.</div>
+    <button id="offlineWarnGo" style="display:block;width:100%;background:#fff;color:#c62828;font-weight:800;font-size:14px;letter-spacing:.04em;padding:11px;border-radius:8px;text-transform:uppercase;cursor:pointer;border:none">→ Open the live site</button>
+  </div>
   <div class="brand">
     <div class="brand-mark" id="brandMark">INSP</div>
     <div class="brand-text">
@@ -1138,11 +1143,23 @@ const QA_EMAIL_DEFAULT = "rarnold@camcomfginc.com";  // default QA inbox; can be
    Increment APP_REV by 1 on every change. APP_VERSION is built from the name + rev so
    every version display (footer, browser tab, download filename, handoff prompt) stays
    in sync automatically. BUILD_DATE stamps when this file was generated. */
+/* The one true home of this app. Any copy running anywhere else (double-clicked file,
+   old download, etc.) shows the OFFLINE COPY warning banner on the main menu. */
+const LIVE_SITE_URL = "https://richarnoldcamco.github.io/machinist-validation-app/";
+const IS_LIVE_SITE  = /(^|\.)github\.io$/i.test(location.hostname);
+
 const APP_NAME = "MACHINIST VALIDATION";
-const APP_REV  = 87;                                  // <-- increment by 1 on every change
+const APP_REV  = 88;                                  // <-- increment by 1 on every change
 const APP_VERSION = `${APP_NAME} - REV-${APP_REV}`;   // e.g. "MACHINIST VALIDATION - REV-56"
 const BUILD_DATE = "2026-07-05";
-/* Rev-87 changelog:
+/* Rev-88 changelog:
+   - OFFLINE-COPY WARNING. When the app is NOT running from the live site (e.g. opened by
+     double-clicking a downloaded HTML file, or any address that isn't *.github.io), the main
+     menu shows a prominent red warning banner: "OFFLINE COPY — NOT THE LIVE SITE", explaining
+     that work done here may not reach the live site, with a one-tap "Open the live site"
+     button (LIVE_SITE_URL constant). On the live site itself the banner never appears.
+   --- prior history ---
+   Rev-87 changelog:
    - CLOUD AUTO-SAVE. When signed in to Cloud Sync, the app now saves the whole snapshot to
      the cloud automatically ~4 seconds after any change (new reading, run, setting, part or
      operation edit) — no more remembering to tap "Save to cloud". Safety guards: auto-save
@@ -2607,6 +2624,11 @@ function showMenu(){
   manageMode=false;
   hideAllScreens(); $("hdr").classList.add("hidden");
   // menu is the top level: no back button
+  const ow=$("offlineWarn");
+  if(ow){
+    ow.style.display = IS_LIVE_SITE ? "none" : "block";
+    const go=$("offlineWarnGo"); if(go) go.onclick=()=>{ window.location.href=LIVE_SITE_URL; };
+  }
   if(LOGO_URL){
     $("brandMark").classList.add("has-logo");
     $("brandMark").innerHTML = `<img src="${LOGO_URL}" alt="Camco Manufacturing">`;
