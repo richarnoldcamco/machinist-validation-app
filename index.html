@@ -45,8 +45,21 @@
   }
   .mono{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:0}
 
+  /* ---- persistent "open the live app" bar (Rev-91), pinned to top of every screen ---- */
+  .livebar{
+    display:block;width:100%;box-sizing:border-box;flex:0 0 auto;
+    height:44px;line-height:44px;text-align:center;text-decoration:none;
+    background:linear-gradient(180deg,#1f8a3b 0%,#12702c 55%,#0d5a20 100%);
+    color:#fff;font-weight:800;font-size:14px;letter-spacing:.06em;text-transform:uppercase;
+    text-shadow:0 -1px 1px rgba(0,0,0,.35);
+    box-shadow:0 2px 6px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.2);
+    position:sticky;top:0;z-index:80;
+  }
+  .livebar:hover{background:linear-gradient(180deg,#23a045 0%,#158034 55%,#0f6626 100%)}
+  .livebar:active{box-shadow:inset 0 2px 4px rgba(0,0,0,.35)}
+
   /* ---- top back button (floats top-right near the title) ---- */
-  .topbar{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:100%;max-width:1400px;padding:0 24px;z-index:60;background:transparent;border:none;pointer-events:none;display:flex;justify-content:flex-end}
+  .topbar{position:absolute;top:56px;left:50%;transform:translateX(-50%);width:100%;max-width:1400px;padding:0 24px;z-index:60;background:transparent;border:none;pointer-events:none;display:flex;justify-content:flex-end}
   .topbar .topback{pointer-events:auto}
   .topback{
     display:inline-flex;align-items:center;gap:9px;
@@ -628,6 +641,8 @@
 </head>
 <body>
 
+<a class="livebar" id="liveAppBar" href="https://richarnoldcamco.github.io/machinist-validation-app/">🔗 Open the Live App</a>
+
 <div class="topbar hidden" id="topbar">
   <a href="https://richarnoldcamco.github.io/Inspection-app/Machinist_Validation_App_v1_2-1.html" class="topback" style="background: linear-gradient(180deg,#1f7a4d 0%,#186e2f 50%,#0d5a20 100%); border-color: #0d5a20; text-decoration: none; margin-right: 12px;"><span style="font-size:16px">🔗</span> GitHub</a>
   <button class="topback" id="topBack"><span class="bk-arrow">↩</span> Go back</button>
@@ -1156,10 +1171,17 @@ const LIVE_SITE_URL = "https://richarnoldcamco.github.io/machinist-validation-ap
 const IS_LIVE_SITE  = /(^|\.)github\.io$/i.test(location.hostname);
 
 const APP_NAME = "MACHINIST VALIDATION";
-const APP_REV  = 90;                                  // <-- increment by 1 on every change
+const APP_REV  = 91;                                  // <-- increment by 1 on every change
 const APP_VERSION = `${APP_NAME} - REV-${APP_REV}`;   // e.g. "MACHINIST VALIDATION - REV-56"
 const BUILD_DATE = "2026-07-06";
-/* Rev-90 changelog:
+/* Rev-91 changelog:
+   - "OPEN THE LIVE APP" BAR. A full-width green bar is now pinned to the top of every screen
+     (it sticks in place as you scroll). Tapping it opens the live site
+     (https://richarnoldcamco.github.io/machinist-validation-app/). It shows on every copy,
+     including the live site itself, as a always-available shortcut. The floating "Go back"
+     button was nudged down so it clears the new bar.
+   --- prior history ---
+   Rev-90 changelog:
    - AUTO-LOAD FROM CLOUD ON OPEN. When you're signed in to Cloud Sync, the app now
      automatically pulls the newest cloud data every time you open it — so a device you
      only view on (e.g. the desktop) shows the latest edits from your other device (e.g.
