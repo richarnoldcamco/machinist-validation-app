@@ -1156,10 +1156,22 @@ const LIVE_SITE_URL = "https://richarnoldcamco.github.io/machinist-validation-ap
 const IS_LIVE_SITE  = /(^|\.)github\.io$/i.test(location.hostname);
 
 const APP_NAME = "MACHINIST VALIDATION";
-const APP_REV  = 89;                                  // <-- increment by 1 on every change
+const APP_REV  = 90;                                  // <-- increment by 1 on every change
 const APP_VERSION = `${APP_NAME} - REV-${APP_REV}`;   // e.g. "MACHINIST VALIDATION - REV-56"
-const BUILD_DATE = "2026-07-05";
-/* Rev-89 changelog:
+const BUILD_DATE = "2026-07-06";
+/* Rev-90 changelog:
+   - AUTO-LOAD FROM CLOUD ON OPEN. When you're signed in to Cloud Sync, the app now
+     automatically pulls the newest cloud data every time you open it — so a device you
+     only view on (e.g. the desktop) shows the latest edits from your other device (e.g.
+     the phone) without having to tap "Load from cloud". How it stays safe: the app
+     remembers a timestamp of the snapshot it last saved or loaded (mv_cloud_last_sync).
+     On open it checks the cloud snapshot's savedAt time and only replaces local data when
+     the cloud copy is genuinely NEWER — so it never wipes out edits this device made but
+     hadn't uploaded yet. It also flushes any pending auto-save the moment the app is hidden
+     or closed, shrinking the window where a just-made change hasn't reached the cloud.
+     Nothing happens for local-only users (no cloud connection) or in Preview mode.
+   --- prior history ---
+   Rev-89 changelog:
    - Part numbers now DOMINATE the part-picker screens (Start Inspection and Edit Part
      Numbers & Operations): the part-number chip is much larger (20px, extra-bold) and
      rendered white-on-maroon so the eye lands on it first. Operation-picker "OP" badges
@@ -1646,9 +1658,12 @@ async function applySnapshot(snap){
    - Skips while in Preview mode or while a cloud Load is being applied.
    - Overlapping pushes queue (one at a time; latest state wins). */
 const CLOUD_SYNCED_FLAG="mv_cloud_synced_once";
+const CLOUD_LAST_SYNC="mv_cloud_last_sync";   // savedAt of the snapshot this device last pushed or loaded
 let cloudPushTimer=null, applyingSnapshot=false, autoPushBusy=false, autoPushAgain=false;
 function cloudSyncedOnce(){ try{ return !!localStorage.getItem(CLOUD_SYNCED_FLAG); }catch(e){ return false; } }
 function markCloudSynced(){ try{ localStorage.setItem(CLOUD_SYNCED_FLAG,"1"); }catch(e){} }
+function getLastSync(){ try{ return localStorage.getItem(CLOUD_LAST_SYNC)||""; }catch(e){ return ""; } }
+function setLastSync(ts){ try{ if(ts) localStorage.setItem(CLOUD_LAST_SYNC, ts); }catch(e){} }
 function autoCloudEnabled(){ return settings.autoCloud!==false; }   // default ON
 function queueCloudAutoSave(){
   if(previewMode||applyingSnapshot) return;
@@ -1665,7 +1680,7 @@ async function sbAutoPush(){
     const snap=await buildSnapshot();
     const {error}=await sbClient.from("snapshots").upsert({user_id:sbUser.id, data:snap, updated_at:new Date().toISOString()});
     if(error){ sbSetStatus("Auto-save failed: "+error.message,false); }
-    else { sbSetStatus("Auto-saved to cloud ✓ "+new Date().toLocaleTimeString(),true); }
+    else { setLastSync(snap.savedAt); sbSetStatus("Auto-saved to cloud ✓ "+new Date().toLocaleTimeString(),true); }
   }catch(e){ sbSetStatus("Auto-save failed: "+(e&&e.message?e.message:e),false); }
   autoPushBusy=false;
   if(autoPushAgain){ autoPushAgain=false; queueCloudAutoSave(); }
@@ -1686,7 +1701,7 @@ async function sbPush(){
     const sizeKB=Math.round(JSON.stringify(snap).length/1024);
     const {error}=await sbClient.from("snapshots").upsert({user_id:sbUser.id, data:snap, updated_at:new Date().toISOString()});
     if(error){ const m="Save failed: "+error.message; flash(m,true); sbSetStatus(m,false); return; }
-    markCloudSynced();
+    markCloudSynced(); setLastSync(snap.savedAt);
     flash("Saved to cloud ✓"); sbSetStatus(`Saved to cloud ✓ (${sizeKB} KB)`,true);
   }catch(e){ const m="Save failed: "+(e&&e.message?e.message:e); flash(m,true); sbSetStatus(m+" (if this is about size, your images are too large for one snapshot — tell Claude)",false); }
 }
@@ -1697,11 +1712,44 @@ async function sbPull(silent){
     if(error){ if(!silent){ const m="Load failed: "+error.message; flash(m,true); sbSetStatus(m,false); } return; }
     if(!data||!data.data){ if(!silent){ flash("No cloud data saved yet",false); sbSetStatus("No cloud data saved yet — Save to cloud first.",false); } return; }
     await applySnapshot(data.data);
-    markCloudSynced();
+    markCloudSynced(); setLastSync(data.data.savedAt);
     flash("Loaded from cloud — reloading…"); sbSetStatus("Loaded from cloud — reloading…",true);
     setTimeout(()=>location.reload(),700);
   }catch(e){ if(!silent){ const m="Load failed: "+(e&&e.message?e.message:e); flash(m,true); sbSetStatus(m,false); } }
 }
+/* ---------- Cloud AUTO-LOAD on open (Rev-90) ----------
+   Runs once during boot after the sign-in session is restored. If the cloud snapshot is
+   NEWER than the one this device last saved/loaded (by savedAt timestamp), it applies it and
+   reloads — so a view-only device always opens showing the latest edits. It never overwrites
+   local changes this device made but hasn't uploaded yet, because those keep the last-sync
+   marker unchanged, so an equal/older cloud copy is skipped. Silent and best-effort. */
+async function sbAutoPullOnBoot(){
+  try{
+    if(!sbClient || !sbUser) return;
+    if(previewMode) return;
+    if(!autoCloudEnabled()) return;
+    if(!cloudSyncedOnce()) return;
+    const {data,error}=await sbClient.from("snapshots").select("data").eq("user_id",sbUser.id).maybeSingle();
+    if(error || !data || !data.data) return;
+    const cloudSavedAt = data.data.savedAt || "";
+    if(!cloudSavedAt) return;                          // no timestamp to compare — leave local as-is
+    const lastSync = getLastSync();
+    if(lastSync && cloudSavedAt <= lastSync) return;   // local already has this (or newer) — nothing to do
+    await applySnapshot(data.data);
+    markCloudSynced(); setLastSync(cloudSavedAt);
+    location.reload();
+  }catch(e){ /* offline or transient — just carry on with local data */ }
+}
+/* When the app is hidden or closed, immediately fire any pending auto-save so a just-made
+   change reaches the cloud before another device auto-loads. */
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState!=="hidden") return;
+  if(!cloudPushTimer) return;
+  clearTimeout(cloudPushTimer); cloudPushTimer=null;
+  if(!previewMode && !applyingSnapshot && sbClient && sbUser && autoCloudEnabled() && cloudSyncedOnce()){
+    try{ sbAutoPush(); }catch(e){}
+  }
+});
 let previewMode=false, previewReturn=null;   // preview = run the inspection UI without saving
 function putRun(run){return new Promise((res,rej)=>{if(previewMode){res();return;}const r=tx(RUNS,"readwrite").put(run);r.onsuccess=()=>res();r.onerror=()=>rej(r.error);});}
 function putReading(rd){return new Promise((res,rej)=>{if(previewMode){res(Date.now());return;}const r=tx(STORE,"readwrite").put(rd);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
@@ -4082,7 +4130,7 @@ $("inSN").addEventListener("focus",function(){ this.select(); });
 openDB()
   .then(loadSettings)
   .then(autoUpdateRevFromVersion)
-  .then(()=>{ if(sbInit()) return sbRestoreSession(); })
+  .then(()=>{ if(sbInit()) return sbRestoreSession().then(sbAutoPullOnBoot); })
   .then(loadParts)
   .then(loadCustomOps)
   .then(()=>upcaseAllData())
