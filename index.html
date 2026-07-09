@@ -668,7 +668,7 @@
   <div class="brand">
     <div class="brand-mark" id="brandMark">INSP</div>
     <div class="brand-text">
-      <div class="brand-title" id="brandTitle">In-Process Inspection</div>
+      <div class="brand-title" id="brandTitle">MACHINIST VALIDATING APP</div>
       <div class="brand-sub" id="brandStation">Demo build</div>
     </div>
   </div>
@@ -1170,11 +1170,18 @@ const QA_EMAIL_DEFAULT = "rarnold@camcomfginc.com";  // default QA inbox; can be
 const LIVE_SITE_URL = "https://richarnoldcamco.github.io/machinist-validation-app/";
 const IS_LIVE_SITE  = /(^|\.)github\.io$/i.test(location.hostname);
 
-const APP_NAME = "MACHINIST VALIDATION";
-const APP_REV  = 91;                                  // <-- increment by 1 on every change
+const APP_NAME = "MACHINIST VALIDATING APP";
+const APP_REV  = 92;                                  // <-- increment by 1 on every change
 const APP_VERSION = `${APP_NAME} - REV-${APP_REV}`;   // e.g. "MACHINIST VALIDATION - REV-56"
 const BUILD_DATE = "2026-07-06";
-/* Rev-91 changelog:
+/* Rev-92 changelog:
+   - RENAMED the app to "MACHINIST VALIDATING APP". The name now shows as the big title at
+     the top of the menu, in the browser tab, in the footer, and in the downloaded file name
+     (APP_NAME drives all of them). The big menu title previously showed the document number;
+     it now shows the app name. The document number setting is unchanged and still appears on
+     the inspection header and reports.
+   --- prior history ---
+   Rev-91 changelog:
    - "OPEN THE LIVE APP" BAR. A full-width green bar is now pinned to the top of every screen
      (it sticks in place as you scroll). Tapping it opens the live site
      (https://richarnoldcamco.github.io/machinist-validation-app/). It shows on every copy,
@@ -2719,7 +2726,7 @@ function showMenu(){
     $("brandMark").classList.add("has-logo");
     $("brandMark").innerHTML = `<img src="${LOGO_URL}" alt="Camco Manufacturing">`;
   }
-  $("brandTitle").textContent = settings.docNumber || "In-Process Inspection";
+  $("brandTitle").textContent = APP_NAME;
   $("brandStation").textContent = settings.station || "—";
   const mr=$("mResume");
   if(resumeRun){
@@ -3970,7 +3977,7 @@ $("downloadAppBtn").onclick=()=>{
   const timeStr = String(now.getHours()).padStart(2, '0') + 
                   String(now.getMinutes()).padStart(2, '0') + 
                   String(now.getSeconds()).padStart(2, '0');
-  const filename=`MACHINIST VALIDATION - REV-${rev}_${dateStr}_${timeStr}.html`;
+  const filename=`${APP_NAME} - REV-${rev}_${dateStr}_${timeStr}.html`;
   download(filename, html, "text/html");
 };
 $("pwSubmit").onclick=submitPassword;
