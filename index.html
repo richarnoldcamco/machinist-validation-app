@@ -241,6 +241,8 @@
   .op-row .op-inspect{flex:1;margin-bottom:0}
   .op-edit-btn{flex:none;background:var(--panel);border:1px solid var(--signal);color:var(--signal);border-radius:3px;padding:0 16px;font-size:14px;font-weight:700;cursor:pointer}
   .op-edit-btn:active{background:rgba(110,20,20,.08)}
+  .pc-del-btn{flex:none;background:var(--panel);border:1px solid var(--nogo);color:var(--nogo);border-radius:3px;padding:0 16px;font-size:14px;font-weight:700;cursor:pointer}
+  .pc-del-btn:active{background:rgba(198,40,40,.10)}
   .add-op-btn:hover{background:#23a045}
   .add-op-btn:active{background:#186e2f;transform:translateY(1px)}
   .add-op-btn .ao-plus{font-size:20px;line-height:1;color:#fff}
@@ -1171,10 +1173,18 @@ const LIVE_SITE_URL = "https://richarnoldcamco.github.io/machinist-validation-ap
 const IS_LIVE_SITE  = /(^|\.)github\.io$/i.test(location.hostname);
 
 const APP_NAME = "MACHINIST VALIDATING APP";
-const APP_REV  = 92;                                  // <-- increment by 1 on every change
+const APP_REV  = 93;                                  // <-- increment by 1 on every change
 const APP_VERSION = `${APP_NAME} - REV-${APP_REV}`;   // e.g. "MACHINIST VALIDATION - REV-56"
-const BUILD_DATE = "2026-07-06";
-/* Rev-92 changelog:
+const BUILD_DATE = "2026-07-09";
+/* Rev-93 changelog:
+   - DELETE button on each part row of the Edit Part Numbers & Operations screen (next to
+     "Edit part"). Tapping it opens a styled confirmation popup naming the part and its
+     operation count — "Yes, delete part" (red) or "Cancel" — instead of deleting directly.
+     The Delete button inside the Edit-part popup now uses the same styled confirmation
+     (previously a plain browser confirm box). Deletion still removes the part, its custom
+     operations, and refreshes the list; cloud auto-save picks up the change as usual.
+   --- prior history ---
+   Rev-92 changelog:
    - RENAMED the app to "MACHINIST VALIDATING APP". The name now shows as the big title at
      the top of the menu, in the browser tab, in the footer, and in the downloaded file name
      (APP_NAME drives all of them). The big menu title previously showed the document number;
@@ -2814,18 +2824,54 @@ async function savePartModal(){
   closePartModal();
   showPicker();
 }
-async function deletePartModal(){
-  if(pmEditIdx<0) return;
-  const part=PARTS[pmEditIdx];
-  if(!confirm(`Delete ${part.partNumber} and all its operations on this device?`)) return;
+/* Shared part deletion: removes the part + its saved custom operations, then refreshes. */
+async function deletePartAt(idx){
+  const part=PARTS[idx];
+  if(!part) return;
   try{
     const saved=(await getSetting("customOps"))||{};
     if(saved[part.partNumber]){ delete saved[part.partNumber]; await putSetting("customOps",saved); }
   }catch(e){}
-  PARTS.splice(pmEditIdx,1);
+  PARTS.splice(idx,1);
   await persistParts();
-  closePartModal();
+  flash(`Part ${part.partNumber} deleted`);
   showPicker();
+}
+/* Styled "are you sure?" popup before deleting a part. */
+function confirmDeletePart(idx, afterConfirm){
+  const part=PARTS[idx];
+  if(!part) return;
+  const opsTxt = part.ops.length===1 ? "1 operation" : `${part.ops.length} operations`;
+  const backdrop=document.createElement("div");
+  backdrop.className="modal-backdrop";
+  backdrop.onclick=(e)=>{ if(e.target===backdrop) backdrop.remove(); };
+  const modal=document.createElement("div");
+  modal.className="modal-dialog";
+  modal.style.maxWidth="480px";
+  modal.innerHTML=`
+    <h2 style="color:var(--nogo)">⚠️ Delete this part?</h2>
+    <p style="font-size:16px;color:var(--ink)">You're about to delete <b>${esc(part.partNumber)}</b>${part.customer?` (${esc(part.customer)})`:""} and its <b>${opsTxt}</b> from this device.</p>
+    <p>This can't be undone here. (If your cloud backup still has it, "Load from cloud" could bring it back — but cloud auto-save will soon overwrite that too.)</p>
+  `;
+  const row=document.createElement("div");
+  row.style.cssText="display:flex;gap:10px;margin-top:6px";
+  const del=document.createElement("button");
+  del.style.cssText="flex:1;background:var(--nogo);color:#fff;font-weight:700;font-size:15px;padding:14px;border-radius:8px;border:none;cursor:pointer;text-transform:uppercase;letter-spacing:.03em";
+  del.textContent="Yes, delete part";
+  del.onclick=async()=>{ backdrop.remove(); if(afterConfirm) afterConfirm(); await deletePartAt(idx); };
+  const cancel=document.createElement("button");
+  cancel.className="modal-close";
+  cancel.style.cssText="flex:1;width:auto";
+  cancel.textContent="Cancel";
+  cancel.onclick=()=>backdrop.remove();
+  row.appendChild(del); row.appendChild(cancel);
+  modal.appendChild(row);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+}
+async function deletePartModal(){
+  if(pmEditIdx<0) return;
+  confirmDeletePart(pmEditIdx, closePartModal);
 }
 function showPicker(){
   hideAllScreens();
@@ -2844,10 +2890,11 @@ function showPicker(){
         <span class="pc-body"><span class="pc-op">${p.ops.length} operation${p.ops.length===1?"":"s"}${p.customer?` · ${esc(p.customer)}`:""}</span><span class="pc-meta">Tap to ${manageMode?"manage":"choose"} operation</span></span>
         <span class="pc-arrow">${manageMode?"›":"›"}</span>
       </button>
-      ${manageMode?`<button class="op-edit-btn" data-pedit="${i}">Edit part</button>`:""}
+      ${manageMode?`<button class="op-edit-btn" data-pedit="${i}">Edit part</button><button class="pc-del-btn" data-pdel="${i}">Delete</button>`:""}
     </div>`).join("");
   list.querySelectorAll(".op-inspect").forEach(b=>b.onclick=()=>showOpPicker(parseInt(b.dataset.i,10)));
   list.querySelectorAll("[data-pedit]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();openPartModal(parseInt(b.dataset.pedit,10));});
+  list.querySelectorAll("[data-pdel]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();confirmDeletePart(parseInt(b.dataset.pdel,10));});
   if(manageMode){
     const addPart=document.createElement("button");
     addPart.className="add-op-btn";
